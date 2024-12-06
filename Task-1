@@ -1,0 +1,162 @@
+/*/Html code
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text-to-Speech Converter</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        .container { width: 60%; margin: auto; padding: 20px; }
+        .input-field, .select-field, .buttons { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Text-to-Speech Conversion</h2>
+        <div class="input-field">
+            <textarea id="text" rows="5" cols="50" placeholder="Enter text here..."></textarea>
+        </div>
+        <div class="select-field">
+            <label for="language">Select Language:</label>
+            <select id="language">
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+            </select>
+        </div>
+        <div class="select-field">
+            <label for="gender">Select Voice:</label>
+            <select id="gender">
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+            </select>
+        </div>
+        <div class="buttons">
+            <button onclick="convertTextToSpeech()">Convert to Speech</button>
+        </div>
+        <div class="audio-container">
+            <audio id="audioPlayer" controls style="display: none;"></audio>
+        </div>
+    </div>
+
+    <script>
+        async function convertTextToSpeech() {
+            const text = document.getElementById('text').value;
+            const language = document.getElementById('language').value;
+            const gender = document.getElementById('gender').value;
+
+            if (!text.trim()) {
+                alert("Text cannot be empty!");
+                return;
+            }
+
+            try {
+                const response = await fetch('/synthesize', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text, language, gender })
+                });
+
+                if (response.ok) {
+                    const audioPlayer = document.getElementById('audioPlayer');
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+
+                    // Set the audio source and play it
+                    audioPlayer.src = url;
+                    audioPlayer.style.display = 'block';
+                    audioPlayer.play();
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.error);
+                }
+            } catch (err) {
+                alert('Error: Unable to connect to the server.');
+                console.error(err);
+            }
+        }
+    </script>
+</body>
+</html>
+
+
+/*/PYTHON CODE
+from flask import Flask, request, jsonify, render_template, send_file
+from flask_cors import CORS
+from gtts import gTTS
+import pyttsx3
+import os
+import uuid
+
+app = Flask(__name__)
+CORS(app)  # Enable Cross-Origin Resource Sharing
+
+# Create a folder to save text data if it doesn't already exist
+SAVE_FOLDER = 'saved_data'
+os.makedirs(SAVE_FOLDER, exist_ok=True)
+
+# Route to render the HTML page
+@app.route('/')
+def index():
+    return render_template('tts.html')  # Ensure `tts.html` is in the `templates/` folder
+
+# Endpoint for text-to-speech synthesis
+@app.route('/synthesize', methods=['POST'])
+def synthesize():
+    # Parse input JSON
+    data = request.get_json()
+    text = data.get('text', '').strip()
+    language = data.get('language', 'en')
+    gender = data.get('gender', 'male')
+
+    if not text:
+        return jsonify({'error': 'Text input cannot be empty!'}), 400
+
+    try:
+        # Save text to a file
+        file_path = os.path.join(SAVE_FOLDER, f"text_{uuid.uuid4().hex}.txt")
+        with open(file_path, 'w') as f:
+            f.write(text)
+
+        # Generate a unique filename for the audio file
+        unique_id = uuid.uuid4().hex
+        filename = f"output_{gender}_{unique_id}.mp3"
+
+        if gender == 'male':
+            # Using pyttsx3 for male voice
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 150)
+            voices = engine.getProperty('voices')
+
+            # Select male voice (fallback to default if no male voice is found)
+            male_voice = next((voice for voice in voices if 'male' in voice.name.lower()), voices[0])
+            engine.setProperty('voice', male_voice.id)
+
+            # Save the speech to file
+            engine.save_to_file(text, filename)
+            engine.runAndWait()
+        else:
+            # Using gTTS for female voice
+            tts = gTTS(text=text, lang=language, slow=False)
+            tts.save(filename)
+
+        # Stream the audio file to the client
+        return send_file(filename, mimetype='audio/mpeg')
+
+    except Exception as e:
+        # Handle exceptions
+        return jsonify({'error': f"An error occurred: {str(e)}"}), 500
+
+    finally:
+        # Clean up the file after sending it
+        if os.path.exists(filename):
+            os.remove(filename)
+
+# Run the Flask app
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
